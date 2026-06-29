@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
   <meta name="theme-color" content="#0f0f1a">
   <title>I-Padel Fan Zone — Scanner</title>
-  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
   <style>
     /* ─── CONFIG NOTE ────────────────────────────────────────────────────────
        Before uploading to Netlify, set GAS_URL and SCANNER_PIN below in the
@@ -387,10 +387,10 @@ function processCheckIn(guestId) {
     onError();
   };
 
-  // Timeout fallback (10 s)
+  // Timeout fallback (30 s)
   setTimeout(function() {
     if (!done) { done = true; delete window[cbName]; onError(); }
-  }, 10000);
+  }, 30000);
 
   script.src = GAS_URL
     + '?action=checkin'

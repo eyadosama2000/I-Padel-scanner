@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta name="theme-color" content="#0f0f1a">
+  <title>I-Padel Fan Zone — Scanner</title>
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js" defer></script>
+  <style>
+    /* ─── CONFIG NOTE ────────────────────────────────────────────────────────
+       Before uploading to Netlify, set GAS_URL and SCANNER_PIN below in the
+       <script> block near the bottom of this file.
+    ──────────────────────────────────────────────────────────────────────── */
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      height: 100%; background: #0f0f1a; color: #fff; overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      user-select: none; -webkit-user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* ── Panels ─────────────────────────────────────────────────────────── */
+    .panel {
+      display: none; position: fixed; inset: 0;
+      flex-direction: column; align-items: center; justify-content: center;
+      padding: 32px 24px; text-align: center; z-index: 10;
+    }
+    .panel.active { display: flex; }
+
+    /* ── PIN panel ──────────────────────────────────────────────────────── */
+    #panel-pin { background: #0f0f1a; gap: 0; }
+    .pin-logo  { font-size: 52px; margin-bottom: 8px; }
+    .pin-brand { font-size: 21px; font-weight: 800; margin-bottom: 4px; }
+    .pin-sub   { font-size: 12px; color: rgba(255,255,255,.4); margin-bottom: 30px;
+                 text-transform: uppercase; letter-spacing: 1px; }
+    .pin-label { font-size: 13px; color: rgba(255,255,255,.5); margin-bottom: 14px; }
+    .pin-dots  { display: flex; gap: 14px; margin-bottom: 30px; }
+    .pin-dot   { width: 16px; height: 16px; border-radius: 50%;
+                 border: 2px solid rgba(255,255,255,.3); transition: background .12s, border-color .12s; }
+    .pin-dot.filled { background: #4ecdc4; border-color: #4ecdc4; }
+    .numpad    { display: grid; grid-template-columns: repeat(3, 70px); gap: 12px; }
+    .num-btn   { width: 70px; height: 70px; border-radius: 50%; border: none;
+                 background: rgba(255,255,255,.08); color: #fff; font-size: 22px;
+                 font-weight: 600; cursor: pointer; transition: background .1s;
+                 display: flex; align-items: center; justify-content: center; }
+    .num-btn:active { background: rgba(78,205,196,.3); }
+    .num-btn.del    { font-size: 18px; color: rgba(255,255,255,.6); }
+    .num-btn.empty  { visibility: hidden; }
+    .pin-error { margin-top: 16px; font-size: 13px; color: #ff6b6b; min-height: 20px; }
+    @keyframes shake {
+      0%,100%{transform:translateX(0)} 20%,60%{transform:translateX(-8px)} 40%,80%{transform:translateX(8px)}
+    }
+
+    /* ── Scanner panel ──────────────────────────────────────────────────── */
+    #panel-scanner { padding: 0; background: #000; justify-content: flex-start; }
+    #panel-scanner.active { display: flex; }
+
+    #scanner-header {
+      flex: 0 0 auto;
+      background: linear-gradient(135deg, #1a1a3e, #16213e);
+      border-bottom: 1px solid rgba(255,255,255,.08);
+      padding: 10px 16px 8px; text-align: center; position: relative;
+    }
+    #scanner-header h1 { font-size: 15px; font-weight: 700; }
+    #scanner-header p  { font-size: 11px; color: rgba(255,255,255,.45); margin-top: 2px; }
+    .lock-btn {
+      position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+      font-size: 11px; color: rgba(255,255,255,.35); cursor: pointer; padding: 4px 8px;
+    }
+
+    #camera-wrap { flex: 1 1 auto; position: relative; overflow: hidden; background: #000; }
+    #video       { width: 100%; height: 100%; object-fit: cover; display: block; }
+    #canvas      { display: none; }
+
+    #scan-frame {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      pointer-events: none;
+    }
+    .frame-box {
+      width: min(240px, 68vw); height: min(240px, 68vw); position: relative;
+    }
+    .frame-box::before,.frame-box::after,
+    .frame-box > span::before,.frame-box > span::after {
+      content:''; position:absolute; width:26px; height:26px;
+      border-color:#4ecdc4; border-style:solid; border-width:0;
+    }
+    .frame-box::before  {top:0;left:0;  border-top-width:3px;    border-left-width:3px;  border-radius:4px 0 0 0;}
+    .frame-box::after   {top:0;right:0; border-top-width:3px;    border-right-width:3px; border-radius:0 4px 0 0;}
+    .frame-box>span::before{bottom:0;left:0;  border-bottom-width:3px;border-left-width:3px;  border-radius:0 0 0 4px;}
+    .frame-box>span::after {bottom:0;right:0; border-bottom-width:3px;border-right-width:3px; border-radius:0 0 4px 0;}
+    .scan-line {
+      position:absolute; left:8px; right:8px; height:2px;
+      background:linear-gradient(90deg,transparent,#4ecdc4,transparent);
+      box-shadow:0 0 8px #4ecdc4; animation:scan 2s ease-in-out infinite;
+    }
+    @keyframes scan{0%{top:8px}50%{top:calc(100% - 10px)}100%{top:8px}}
+
+    #cam-status {
+      position:absolute; bottom:12px; left:0; right:0;
+      text-align:center; font-size:13px; color:rgba(255,255,255,.65); pointer-events:none;
+    }
+    #no-camera {
+      display:none; position:absolute; inset:0;
+      align-items:center; justify-content:center; flex-direction:column;
+      gap:10px; text-align:center; padding:24px;
+      color:rgba(255,255,255,.55); font-size:14px; background:#000;
+    }
+    #no-camera.show { display:flex; }
+    #no-camera .icon { font-size:42px; }
+
+    #input-bar {
+      flex: 0 0 auto; display: flex; gap: 8px;
+      padding: 10px 12px; background: #16213e;
+      border-top: 1px solid rgba(255,255,255,.08);
+    }
+    #guest-input {
+      flex:1; padding:10px 14px; border-radius:10px;
+      border:1.5px solid rgba(255,255,255,.15); background:rgba(255,255,255,.07);
+      color:#fff; font-size:15px; outline:none;
+      text-transform:uppercase; letter-spacing:1px; transition:border-color .2s;
+    }
+    #guest-input::placeholder{color:rgba(255,255,255,.3);text-transform:none;letter-spacing:0;}
+    #guest-input:focus{border-color:#4ecdc4;}
+    #btn-checkin {
+      padding:10px 16px; border-radius:10px; border:none;
+      background:#4ecdc4; color:#0f0f1a; font-size:15px; font-weight:700;
+      cursor:pointer; white-space:nowrap; transition:opacity .15s;
+    }
+    #btn-checkin:active{opacity:.75;}
+    #btn-checkin:disabled{opacity:.4;cursor:default;}
+
+    /* ── Processing ─────────────────────────────────────────────────────── */
+    #processing {
+      display:none; position:fixed; inset:0; z-index:90;
+      background:rgba(0,0,0,.7);
+      align-items:center; justify-content:center; flex-direction:column; gap:16px; font-size:16px;
+    }
+    #processing.show{display:flex;}
+    .spinner{
+      width:44px;height:44px;border:4px solid rgba(255,255,255,.2);
+      border-top-color:#4ecdc4;border-radius:50%;animation:spin .8s linear infinite;
+    }
+    @keyframes spin{to{transform:rotate(360deg)}}
+
+    /* ── Result overlay ─────────────────────────────────────────────────── */
+    #overlay {
+      display:none; position:fixed; inset:0; z-index:100;
+      flex-direction:column; align-items:center; justify-content:center;
+      text-align:center; padding:32px 24px;
+      animation:pop .25s cubic-bezier(.175,.885,.32,1.275);
+    }
+    #overlay.show{display:flex;}
+    #overlay.green{background:#0d4f35;}
+    #overlay.red  {background:#5a1a1a;}
+    @keyframes pop{from{transform:scale(.85);opacity:0}to{transform:scale(1);opacity:1}}
+    #overlay-icon  {font-size:96px;line-height:1;margin-bottom:16px;}
+    #overlay-title {font-size:28px;font-weight:800;margin-bottom:10px;}
+    #overlay-detail{font-size:16px;color:rgba(255,255,255,.75);line-height:1.55;max-width:300px;white-space:pre-line;}
+    #overlay-timer {margin-top:28px;font-size:13px;color:rgba(255,255,255,.4);}
+  </style>
+</head>
+<body>
+
+<!-- PIN panel -->
+<div class="panel active" id="panel-pin">
+  <div class="pin-logo">🏓</div>
+  <div class="pin-brand">I-Padel Fan Zone</div>
+  <div class="pin-sub">Egypt World Cup 2026</div>
+  <div class="pin-label">Enter staff PIN to continue</div>
+  <div class="pin-dots" id="pin-dots"></div>
+  <div class="numpad" id="numpad">
+    <button class="num-btn" data-n="1">1</button>
+    <button class="num-btn" data-n="2">2</button>
+    <button class="num-btn" data-n="3">3</button>
+    <button class="num-btn" data-n="4">4</button>
+    <button class="num-btn" data-n="5">5</button>
+    <button class="num-btn" data-n="6">6</button>
+    <button class="num-btn" data-n="7">7</button>
+    <button class="num-btn" data-n="8">8</button>
+    <button class="num-btn" data-n="9">9</button>
+    <button class="num-btn empty" disabled></button>
+    <button class="num-btn" data-n="0">0</button>
+    <button class="num-btn del" id="btn-del">⌫</button>
+  </div>
+  <div class="pin-error" id="pin-error"></div>
+</div>
+
+<!-- Scanner panel -->
+<div class="panel" id="panel-scanner">
+  <div id="scanner-header">
+    <h1>🏓 I-Padel Fan Zone — Scanner</h1>
+    <p>Point camera at guest QR · or type ID below</p>
+    <span class="lock-btn" id="btn-lock">Lock</span>
+  </div>
+  <div id="camera-wrap">
+    <video id="video" playsinline autoplay muted></video>
+    <canvas id="canvas"></canvas>
+    <div id="scan-frame"><div class="frame-box"><span></span><div class="scan-line"></div></div></div>
+    <div id="cam-status">Starting camera…</div>
+    <div id="no-camera"><div class="icon">📷</div><div>Camera unavailable.<br>Use the manual input below.</div></div>
+  </div>
+  <div id="input-bar">
+    <input id="guest-input" type="text" placeholder="e.g. EGY00001-1"
+      autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="go">
+    <button id="btn-checkin">Check In</button>
+  </div>
+</div>
+
+<div id="processing"><div class="spinner"></div><div>Checking ticket…</div></div>
+<div id="overlay">
+  <div id="overlay-icon"></div>
+  <div id="overlay-title"></div>
+  <div id="overlay-detail"></div>
+  <div id="overlay-timer"></div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════════
+//  ↓↓↓  EDIT THESE TWO LINES BEFORE UPLOADING TO NETLIFY  ↓↓↓
+// ═══════════════════════════════════════════════════════════════════════════
+var GAS_URL     = 'https://script.google.com/macros/s/AKfycbyoN50aaXewahYtT2HdUSwNOcRQbv-jv2Cz97WJvan_SFJy3o9G2viKLz6tgzBi8JZl/exec';
+var SCANNER_PIN = '1234';
+// ═══════════════════════════════════════════════════════════════════════════
+
+var entered = '';
+var busy    = false;
+var scanning = false;
+var videoStream = null;
+var PIN_LENGTH  = SCANNER_PIN.length;
+
+var video      = document.getElementById('video');
+var canvas     = document.getElementById('canvas');
+var ctx        = canvas.getContext('2d', { willReadFrequently: true });
+var camStatus  = document.getElementById('cam-status');
+var noCamera   = document.getElementById('no-camera');
+var overlay    = document.getElementById('overlay');
+var processing = document.getElementById('processing');
+var guestInput = document.getElementById('guest-input');
+var btnCheckIn = document.getElementById('btn-checkin');
+
+// ── Build PIN dots ────────────────────────────────────────────────────────
+(function() {
+  var c = document.getElementById('pin-dots');
+  for (var i = 0; i < PIN_LENGTH; i++) {
+    var d = document.createElement('div');
+    d.className = 'pin-dot'; d.id = 'd' + i;
+    c.appendChild(d);
+  }
+})();
+
+// ── Panel helpers ─────────────────────────────────────────────────────────
+function showPanel(id) {
+  ['panel-pin','panel-scanner'].forEach(function(p){
+    document.getElementById(p).classList.remove('active');
+  });
+  document.getElementById(id).classList.add('active');
+}
+
+// ── Boot: check session ───────────────────────────────────────────────────
+if (sessionStorage.getItem('ipadel_auth') === '1') {
+  showPanel('panel-scanner');
+  startScanner();
+} else {
+  showPanel('panel-pin');
+}
+
+// ── PIN ───────────────────────────────────────────────────────────────────
+function updateDots() {
+  for (var i = 0; i < PIN_LENGTH; i++)
+    document.getElementById('d' + i).classList.toggle('filled', i < entered.length);
+}
+function pinDigit(n) {
+  if (entered.length >= PIN_LENGTH) return;
+  entered += n; updateDots();
+  document.getElementById('pin-error').textContent = '';
+  if (entered.length === PIN_LENGTH) checkPin();
+}
+function pinDelete() {
+  entered = entered.slice(0, -1); updateDots();
+  document.getElementById('pin-error').textContent = '';
+}
+function checkPin() {
+  if (entered === SCANNER_PIN) {
+    sessionStorage.setItem('ipadel_auth', '1');
+    showPanel('panel-scanner');
+    startScanner();
+  } else {
+    document.getElementById('pin-error').textContent = 'Incorrect PIN — try again';
+    var dots = document.getElementById('pin-dots');
+    dots.style.animation = 'none'; dots.offsetHeight;
+    dots.style.animation = 'shake .4s ease';
+    entered = '';
+    setTimeout(updateDots, 420);
+  }
+}
+document.getElementById('numpad').addEventListener('click', function(e) {
+  var btn = e.target.closest('.num-btn');
+  if (!btn) return;
+  if (btn.id === 'btn-del') { pinDelete(); return; }
+  if (btn.dataset.n !== undefined) pinDigit(btn.dataset.n);
+});
+
+// Lock button
+document.getElementById('btn-lock').addEventListener('click', function() {
+  sessionStorage.removeItem('ipadel_auth');
+  if (videoStream) { videoStream.getTracks().forEach(function(t){t.stop();}); videoStream = null; }
+  scanning = false; entered = ''; updateDots();
+  showPanel('panel-pin');
+});
+
+// ── Camera ────────────────────────────────────────────────────────────────
+function startScanner() {
+  scanning = true;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showNoCamera(); return;
+  }
+  navigator.mediaDevices.getUserMedia({
+    video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 } },
+    audio: false
+  })
+  .then(function(stream) {
+    videoStream = stream;
+    video.srcObject = stream;
+    video.addEventListener('loadedmetadata', function() {
+      camStatus.textContent = 'Ready — point at QR code';
+      requestAnimationFrame(scanLoop);
+    });
+  })
+  .catch(function() { showNoCamera(); });
+}
+function showNoCamera() {
+  noCamera.classList.add('show');
+  camStatus.style.display = 'none';
+  document.getElementById('scan-frame').style.display = 'none';
+}
+function scanLoop() {
+  if (!scanning) return;
+  if (video.readyState === video.HAVE_ENOUGH_DATA) {
+    canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    var d = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    var code = jsQR(d.data, d.width, d.height, { inversionAttempts: 'dontInvert' });
+    if (code && code.data) {
+      var id = parseGuestId(code.data.trim());
+      if (id) { processCheckIn(id); return; }
+    }
+  }
+  requestAnimationFrame(scanLoop);
+}
+function parseGuestId(raw) {
+  // Plain guest ID: EGY00001-1
+  if (/^[A-Z]{3}\d{5}-\d{1,2}$/i.test(raw)) return raw.trim().toUpperCase();
+  // URL with ?guestId= param (future-proof)
+  if (raw.startsWith('http')) {
+    try {
+      var p = new URL(raw).searchParams.get('guestId');
+      if (p) return p.trim().toUpperCase();
+    } catch(e) {}
+  }
+  return null;
+}
+
+// ── JSONP check-in call ───────────────────────────────────────────────────
+function processCheckIn(guestId) {
+  if (busy) return;
+  busy = true; scanning = false;
+  guestInput.value = ''; btnCheckIn.disabled = true;
+  processing.classList.add('show');
+
+  var cbName = 'cb_' + Date.now();
+  var script  = document.createElement('script');
+  var done    = false;
+
+  window[cbName] = function(result) {
+    if (done) return; done = true;
+    delete window[cbName];
+    if (script.parentNode) script.parentNode.removeChild(script);
+    onResult(result);
+  };
+
+  script.onerror = function() {
+    if (done) return; done = true;
+    delete window[cbName];
+    if (script.parentNode) script.parentNode.removeChild(script);
+    onError();
+  };
+
+  // Timeout fallback (10 s)
+  setTimeout(function() {
+    if (!done) { done = true; delete window[cbName]; onError(); }
+  }, 10000);
+
+  script.src = GAS_URL
+    + '?action=checkin'
+    + '&guestId=' + encodeURIComponent(guestId)
+    + '&callback=' + cbName;
+  document.head.appendChild(script);
+}
+
+function onResult(r) {
+  processing.classList.remove('show');
+  if (!r) { showResult('red','⚠️','Server Error','No response'); return; }
+  if (r.status === 'valid') {
+    showResult('green','✅','Welcome!',
+      r.customerName + '\n' + r.reservationId + '\nGuest ' + r.guestNumber + ' of ' + r.totalGuests);
+  } else if (r.status === 'used') {
+    showResult('red','🚫','Already Checked In',
+      r.customerName + '\n' + r.reservationId + '\nGuest ' + r.guestNumber);
+  } else if (r.status === 'invalid') {
+    showResult('red','❌','Invalid Ticket', r.guestId || '—');
+  } else {
+    showResult('red','⚠️','Error', r.message || 'Unknown error');
+  }
+}
+function onError() {
+  processing.classList.remove('show');
+  showResult('red','⚠️','Connection Error','Could not reach server.\nCheck internet connection.');
+}
+
+// ── Result overlay ────────────────────────────────────────────────────────
+function showResult(type, icon, title, detail) {
+  overlay.className = 'show ' + (type === 'green' ? 'green' : 'red');
+  document.getElementById('overlay-icon').textContent   = icon;
+  document.getElementById('overlay-title').textContent  = title;
+  document.getElementById('overlay-detail').textContent = detail;
+  var timerEl = document.getElementById('overlay-timer');
+  var rem = 3; timerEl.textContent = 'Next scan in 3…';
+  var cd = setInterval(function(){
+    rem--; timerEl.textContent = rem > 0 ? 'Next scan in ' + rem + '…' : '';
+  }, 1000);
+  setTimeout(function(){ clearInterval(cd); reset(); }, 3200);
+}
+function reset() {
+  overlay.className = ''; btnCheckIn.disabled = false;
+  busy = false; scanning = true; guestInput.focus();
+  if (videoStream) requestAnimationFrame(scanLoop);
+}
+overlay.addEventListener('click', reset);
+
+// ── Manual input ──────────────────────────────────────────────────────────
+btnCheckIn.addEventListener('click', function(){
+  var v = guestInput.value.trim().toUpperCase(); if (v) processCheckIn(v);
+});
+guestInput.addEventListener('keydown', function(e){
+  if (e.key === 'Enter') { var v = guestInput.value.trim().toUpperCase(); if (v) processCheckIn(v); }
+});
+</script>
+</body>
+</html>
